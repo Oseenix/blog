@@ -1,0 +1,6 @@
+# Ignore Hugo resource files
+*.hugo*.lock
+*.swp
+resources/
+public/
+themes/
