@@ -1,0 +1,17 @@
+main:
+  - identifier: home
+    name: Home
+    pageref: /
+    pre: home
+    weight: 1
+  - identifier: about
+    name: About
+    pageref: /about.html
+    pre: user
+    weight: 2
+  - identifier: archives
+    name: Archives
+    pageref: /archives
+    pre: archive
+    weight: 3
+  

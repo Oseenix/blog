@@ -1,6 +1,7 @@
 # Ignore Hugo resource files
 *.hugo*.lock
 *.swp
+*.DS_Store
 resources/
 public/
 themes/

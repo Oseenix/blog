@@ -1,0 +1,14 @@
+# Multi-languages configure
+
+zh-cn:
+  title: fds-board
+  languageName: 中文
+  languageCode: zh-CN
+  hasCJKLanguage: true
+  weight: 2
+en:
+  title: fds-board
+  languageName: English
+  languageCode: en
+  hasCJKLanguage: true
+  weight: 1

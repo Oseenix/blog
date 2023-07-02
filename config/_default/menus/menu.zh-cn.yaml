@@ -1,0 +1,16 @@
+main:
+  - identifier: home
+    name: 首页
+    pageref: /
+    pre: home
+    weight: 1
+  - identifier: about
+    name: 关于
+    pageref: /about.html
+    pre: user
+    weight: 2
+  - identifier: archives
+    name: 归档
+    pageref: /archives
+    pre: archive
+    weight: 3
