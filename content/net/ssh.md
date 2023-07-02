@@ -121,18 +121,30 @@ curl http://localhost:3000
 
 从PcAtHome:B发起ssh隧道连接到VPS:C。
 ```
-ssh -R "*:8989:localhost:22" user@VPS:C
+ssh 
 ```
+
+或者：
+
+```
+# -qTfNn 让ssh会话后台静默运行
+ssh -qTfNn -R "*:8989:localhost:22" user@VPS:C
+```
+
 此时允许从VPS:C上通过localhost接口的8989端访问PcAtHome。
 
 VPS:C主机上修改配置sshd_config：
+
 ```
 GatewayPorts yes
 ```
+
 允许ipad:A可以直接通过
+
 ```
 ssh -p 8989 pcUser@VPS:C
 ```
+
 直接连接PcAtHome。
 
 ssh隧道建立后，vps主机上新增sshd进程监听在8989端口上，该进程与pc和vps间ssh通讯进程为同一进程：
@@ -183,7 +195,7 @@ ssh -D 7001 user@VPS:C
 
 ### 持久连接
 
-持久连接参考[[保持ssh连接](http://fnginx.tk/posts/net/%E4%BF%9D%E6%8C%81ssh%E8%BF%9E%E6%8E%A5/)]
+持久连接参考[保持ssh连接]({{< ref "net/ssh2.md" >}})
 
 ### 自动创建
 
