@@ -45,7 +45,7 @@ markup:
     # # More: https://xyproto.github.io/splash/docs/all.html 
     style: dracula
     # anchorLineNos: true
-    codeFences: false
+    codeFences: true
     guessSyntax: true
     hl_Lines: ""
     hl_inline: false
