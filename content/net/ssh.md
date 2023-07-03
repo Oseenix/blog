@@ -120,8 +120,9 @@ curl http://localhost:3000
 #### 连接命令
 
 从PcAtHome:B发起ssh隧道连接到VPS:C。
+
 ```
-ssh 
+ssh -R "*:8989:localhost:22" user@VPS:C
 ```
 
 或者：

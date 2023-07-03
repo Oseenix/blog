@@ -25,9 +25,12 @@ paginate: 10
 # Enable Emoji support
 enableEmoji: true
 
+enableMath: true
+
 # 让 Makedown 文档支持 HTML 语法，高亮，文章目录等功能
 # Make markdown content support HTML syntax, highlight, toc etc.
 markup:
+  defaultMarkdownHandler: goldmark
   goldmark:
     renderer:
       unsafe: true
@@ -40,9 +43,9 @@ markup:
     # # 更多的样式：https://xyproto.github.io/splash/docs/all.html
     # # Highlight style: monokai | emacs | api | dracula | friendly
     # # More: https://xyproto.github.io/splash/docs/all.html 
-    style: "dracula"
+    style: dracula
     # anchorLineNos: true
-    codeFences: true
+    codeFences: false
     guessSyntax: true
     hl_Lines: ""
     hl_inline: false
@@ -52,7 +55,7 @@ markup:
     lineNumbersInTable: true
     noClasses: true
     noHl: false
-    style: monokai
+    #style: monokai
     tabWidth: 2
   tableOfContents:
     # 开始/结束标题级别：1-6 (建议从2开始)
