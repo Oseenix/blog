@@ -70,7 +70,7 @@ ignoreErrors = ["error-remote-getjson", "error-missing-instagram-accesstoken"]
   images = ["/imgs/avatar.jpeg"]
 
   # Which sections to display on home page
-  mainSections = ["rmd", "net"]
+  mainSections = ["rmd", "net", "devops"]
 
   # Author config
   [params.author]
