@@ -5,9 +5,11 @@ categories:
   - DevOps
 tags: [post-mortem, segfault, python, numpy, scipy, openblas, ABI, ILP64, LP64, conda, poetry, pixi, pip, gdb, core-dump, manylinux]
 date: 2026-03-02
+toc: true
+draft: false
+type: posts
 author: Jinze Zhou
 ---
-# 排查 Numpy/SciPy 段错误：Conda+Poetry 引发 OpenBLAS ILP64/LP64 冲突
 
 ## 问题现象
 
