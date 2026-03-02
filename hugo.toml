@@ -196,16 +196,17 @@ ignoreErrors = ["error-remote-getjson", "error-missing-instagram-accesstoken"]
       enable = true
       [params.page.comment.giscus]
         enable = true
-        repo = "#{Giscus_Repo}"
-        repoId = "#{Giscus_RepoId}"
-        category = "#{Giscus_Category}"
-        categoryId = "#{Giscus_CategoryId}"
+        repo = "Oseenix/blog"
+        repoId = "R_kgDOJ1cdKQ"
+        category = "Announcements"
+        categoryId = "DIC_kwDOJ1cdKc4CXkae"
         lang = ""
-        mapping = "title"
+        mapping = "pathname"
+        strict = "0"
         reactionsEnabled = "1"
         emitMetadata = "0"
-        inputPosition = "top"
-        lazyLoading = false
+        inputPosition = "bottom"
+        lazyLoading = true
         lightTheme = "light"
         darkTheme = "dark"
 
