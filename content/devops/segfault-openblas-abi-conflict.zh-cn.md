@@ -316,7 +316,6 @@ numpy show_config() →
 ```
 
 导致段错误的三个条件（ILP64/LP64 双 OpenBLAS、libopenjp2 三重加载、84 个捆绑 C 库），在 Pixi 环境中压根不会出现。
----
 
 ## 后续发现：libopenjp2 三重加载崩溃
 
