@@ -1,5 +1,6 @@
 ---
 title: "{{ replace .Name "-" " " | title }}"
+author: "Jinze(Jerry) Zhou"
 date: {{ .Date }}
 draft: true
 type: posts
@@ -7,5 +8,9 @@ categories:
 tags:
 toc: true
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE)
+```
 
 <!--more-->
