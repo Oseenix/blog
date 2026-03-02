@@ -3,7 +3,7 @@ title: "Debugging Numpy/SciPy Segfaults: OpenBLAS ILP64/LP64 Conflict via Conda+
 description: "Numpy (PyPI, ILP64) and SciPy (conda-forge, LP64) loading two sets of OpenBLAS led to a glibc free() segfault. A full walkthrough from dmesg to GDB core dumps, and how switching to Pixi fixed it for good."
 categories:
   - DevOps
-tags: [post-mortem, segfault, python, numpy, scipy, openblas, ABI, ILP64, LP64, conda, poetry, pixi, pip, gdb, core-dump, manylinux]
+tags: [python, numpy, scipy, openblas, ABI, ILP64, LP64, conda, poetry, pixi, pip, gdb, core-dump]
 date: 2026-03-02
 toc: true
 draft: false

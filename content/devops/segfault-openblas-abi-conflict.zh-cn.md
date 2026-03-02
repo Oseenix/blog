@@ -3,7 +3,7 @@ title: "排查 Numpy/SciPy 段错误：Conda+Poetry 引发 OpenBLAS ILP64/LP64 �
 description: "Numpy (PyPI, ILP64) 与 SciPy (conda-forge, LP64) 同时加载两套 OpenBLAS，导致 glibc free() 段错误。从 dmesg 到 GDB core dump 完整排查，最终迁移 Pixi 根治。"
 categories:
   - DevOps
-tags: [post-mortem, segfault, python, numpy, scipy, openblas, ABI, ILP64, LP64, conda, poetry, pixi, pip, gdb, core-dump, manylinux]
+tags: [python, numpy, scipy, openblas, ABI, ILP64, LP64, conda, poetry, pixi, pip, gdb, core-dump]
 date: 2026-03-02
 toc: true
 draft: false
