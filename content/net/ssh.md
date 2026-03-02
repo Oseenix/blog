@@ -11,6 +11,7 @@ tags:
   - Tunnel
 
 toc: true
+type: posts
 ---
 
 ## 需求
@@ -18,7 +19,7 @@ toc: true
 希望可以使用ipad pro 随时随地连接家中的电脑主机。
 <!--more-->
 
-```
+```text
   +---------+                 +----------+
   |         |                 |          |
   |  ipad:A |                 |PcAtHome:B|
@@ -47,7 +48,7 @@ SSH有三种端口转发模式，本地端口转发(Local Port Forwarding)，远
 
 在A主机无法直接访问某个[远程接口]:[远程端口]组，而需要通过host-C主机才能进行访问的一些场合。
 
-```
+```text
    curl   ssh          +      sshd      web
      |     |           |        |        |
      |     |           |        |        |
@@ -64,21 +65,21 @@ SSH有三种端口转发模式，本地端口转发(Local Port Forwarding)，远
 
 #### 连接命令
 
-```
+```bash
 ssh -L [本地接口]:[本地端口]:[远程接口]:[远程端口] user@host-C
 ```
 在A中执行以下命令，建立本地转发：
-```
+```bash
 ssh -L localhost:2000:localhost:80 user@host-C
 ```
 那么通过A上执行
-```
+```bash
 curl http://localhost:2000
 ```
 将被通过ssh隧道转发访问host-C上面的80端口。
 
 该条命令执行后，主机A新增端口2000 监听，监听进程为本地主机A与host-C连接的ssh进程：
-```
+```text
 see@17:03:32 ~  netstat -tlpn | grep 2000
 (Not all processes could be identified, non-owned process info
  will not be shown, you would have to be root to see it all.)
@@ -86,11 +87,11 @@ tcp        0      0 127.0.0.1:2000          0.0.0.0:*               LISTEN      
 tcp6       0      0 ::1:2000                :::*                    LISTEN      27104/ssh 
 ```
 如果使用命令:
-```
+```bash
 ssh -L 3000:www.google.com:80 user@host-C
 ```
 如果host-C可以访问外网，那么就可以使用A:3000访问外网。
-```
+```bash
 curl http://localhost:3000
 ```
 以上将访问到google。
@@ -99,7 +100,7 @@ curl http://localhost:3000
 
 #### 场景拓扑
 
-```
+```text
    +---------+                 +--------------+
    |         |                 |PcAtHome:B +--+->--sshd
    |  ipad:A |          ssh0---+-----+     |  |
@@ -121,13 +122,13 @@ curl http://localhost:3000
 
 从PcAtHome:B发起ssh隧道连接到VPS:C。
 
-```
+```bash
 ssh -R "*:8989:localhost:22" user@VPS:C
 ```
 
 或者：
 
-```
+```bash
 # -qTfNn 让ssh会话后台静默运行
 ssh -qTfNn -R "*:8989:localhost:22" user@VPS:C
 ```
@@ -136,20 +137,20 @@ ssh -qTfNn -R "*:8989:localhost:22" user@VPS:C
 
 VPS:C主机上修改配置sshd_config：
 
-```
+```ini
 GatewayPorts yes
 ```
 
 允许ipad:A可以直接通过
 
-```
+```bash
 ssh -p 8989 pcUser@VPS:C
 ```
 
 直接连接PcAtHome。
 
 ssh隧道建立后，vps主机上新增sshd进程监听在8989端口上，该进程与pc和vps间ssh通讯进程为同一进程：
-```
+```text
 root@instance-2 zhoujinze  netstat -nltp | grep sshd
 tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      31897/sshd          
 tcp        0      0 0.0.0.0:8989            0.0.0.0:*               LISTEN      3243/sshd: zhoujinz 
@@ -160,7 +161,7 @@ tcp6       0      0 :::8989                 :::*                    LISTEN      
 
 #### 场景拓扑
 
-```
+```text
          chrome
          |
      msn |    ssh             sshd
@@ -184,7 +185,7 @@ tcp6       0      0 :::8989                 :::*                    LISTEN      
 ### 连接命令
 
 在本地主机A上执行命令：
-```
+```bash
 ssh -D 7001 user@VPS:C
 ```
 这里 SSH 是创建了一个 SOCKS 代理服务。
