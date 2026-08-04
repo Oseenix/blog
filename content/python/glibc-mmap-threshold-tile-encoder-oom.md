@@ -11,7 +11,7 @@ type: posts
 author: Jinze Zhou
 ---
 
-## TL;DR
+## 1. Summary
 
 Three long-running encoder processes got OOM-killed at 20-30 GB despite disciplined `del` +
 `gc.collect()` after every single unit of work. The Python heap was clean — the leak was one
@@ -25,7 +25,7 @@ the rest of the process's life. This applies to any long-running process (Python
 that cycles through many moderately-large, short-lived buffers — image tiles, video frames, ML
 batches, whatever the buffers happen to be.
 
-## The Mechanism: glibc's Adaptive mmap Threshold
+## 2. The Mechanism: glibc's Adaptive mmap Threshold
 
 This site [already has one post]({{< ref "python/thread-leak-asyncio-executor.md" >}}) about glibc malloc eating a WavePy process alive — 164 per-thread arenas, fixed with `MALLOC_ARENA_MAX=4`. This is a *different* mechanism, hitting a *different* code path, in the *same* allocator.
 
@@ -36,7 +36,7 @@ glibc's `malloc()` has two ways to satisfy a request:
 
 The numpy buffers decoded per tile per timestep here land in the 1-5 MB range — comfortably above glibc's *default* 128 KB threshold, so in a naive mental model they should already be going through mmap and coming back cleanly. They weren't, because of one more piece: **by default, glibc doesn't use a fixed threshold — it's adaptive**. Every time a large `mmap`'d chunk is freed, glibc raises the threshold based on that chunk's size (up to 32 MB on 64-bit), on the theory that a workload which needed a large buffer once will probably need a similarly large one again soon, and reusing arena space avoids the mmap/munmap syscall pair. That's a reasonable bet for many workloads. It's the *worst possible* bet for scanning many different tiles, each producing a handful of megabyte-scale buffers used once and thrown away — the threshold keeps climbing after each free, progressively demoting more and more of these one-shot allocations onto the brk heap, where `free()` no longer means "give it back."
 
-## Testing `malloc_trim()` Alone: Mostly Doesn't Help
+## 3. Testing `malloc_trim()` Alone: Mostly Doesn't Help
 
 The obvious first thing to try is calling `malloc_trim(0)` after each tile, since it's specifically designed to hand freed pages back to the OS:
 
@@ -47,7 +47,7 @@ tile 19 RSS:        451.7 MB              409.8 MB   (-9%)
 
 A small improvement, not a fix. `malloc_trim` can only release the **top-of-heap** contiguous free region in each arena — the "wilderness" at the frontier. If even one small, still-live allocation sits above a large freed region, everything below it is pinned; `malloc_trim` can't compact around it. With dozens of differently-sized tile buffers being allocated and freed in an interleaved sequence, the heap fragments in exactly the way that defeats top-of-heap trimming.
 
-## The Fix: Pin the mmap Threshold
+## 4. The Fix: Pin the mmap Threshold
 
 `mallopt(M_MMAP_THRESHOLD, N)` does two things: it sets the cutoff, and — per glibc's documented behavior — calling it at all **disables the dynamic adjustment**, so the threshold stays fixed at `N` for the rest of the process's life instead of creeping upward. Unlike `MALLOC_ARENA_MAX`, this isn't an initialization-time-only knob; it's read on every `malloc()` call, so it's safe to set from Python well after interpreter startup — no `pixi.toml` env-var plumbing required:
 
@@ -63,7 +63,7 @@ except OSError:
 
 64 KB, comfortably below the ~1-5 MB per-tile buffers this workload actually produces, so they consistently route through mmap regardless of what glibc's adaptive logic would otherwise have decided.
 
-## Verification
+## 5. Verification
 
 Same 20-tile, 5×5-region reproduction, with the fix in place:
 
@@ -86,7 +86,7 @@ final RSS after 20 tiles:             396.3 MB   (+123.8 MB, vs. +327 MB unfixed
 
 62% less growth through the real code path. Full regression suite afterward: 481 tests, the same 10 pre-existing baseline failures, zero new failures.
 
-## Two Different Bugs, Same Allocator
+## 6. Two Different Bugs, Same Allocator
 
 Worth being explicit about how this relates to [the arena post]({{< ref "python/thread-leak-asyncio-executor.md" >}}), since both symptoms look identical from the outside ("RSS keeps growing, Python heap looks clean"):
 
@@ -110,20 +110,20 @@ Fix location        pixi.toml [tasks].start.env          wavepy.py, Python-side
 
 Same allocator, two independent knobs, two independent bugs, discovered five months apart in the same codebase. `malloc_trim(0)` helps both, marginally, but is a mitigation for either — not a substitute for addressing the actual knob each bug turns on.
 
-## Takeaways
+## 7. Takeaways
 
 - A profiler that only sees the Python heap (`tracemalloc`, `pympler`) is blind to this entire class of bug — both this one and the arena one from the previous post live one layer below, in the C allocator. `/proc/PID/status`'s `VmRSS` and `/proc/PID/smaps` are the tools that see it.
 - `resource.getrusage().ru_maxrss` is a high-water mark, not current usage — it cannot go down, and using it to check whether a `del` freed memory will lie to you.
 - `del` + `gc.collect()` religiously applied at every tile boundary is necessary but not sufficient. It correctly drops the Python reference; whether the underlying C allocator gives the pages back to the OS is a separate question glibc answers based on allocation size and its own adaptive heuristics, not on how disciplined your Python code is.
 - Two RSS-bloat bugs, same root cause category (glibc ptmalloc), same "the Python side looks perfectly clean" symptom, different fixes. When you've fixed one glibc malloc knob and RSS is *still* misbehaving somewhere else, don't assume it's the same bug wearing a different hat — check which knob is actually implicated before reapplying the last fix.
 
-## Appendix: How This Was Found
+## 8. Appendix: How This Was Found
 
 Everything above is the transferable mechanism, fix, and lessons. Everything below is the
 specific investigation trail that led there in one codebase — skip it unless you want the
 blow-by-blow of ruling out the wrong hypotheses first.
 
-### The Symptom
+### 8.1 The Symptom
 
 One long-running service renders large gridded datasets into image tiles. Rendering a full region — dozens of tiles times several variables times a full time-series worth of timesteps — runs inside a single long-lived `EncodePNG.encode()` call, in one Python process, launched fresh per batch cycle.
 
@@ -140,11 +140,11 @@ The kernel OOM killer took out three of these processes inside a four-minute win
 
 Three separate PIDs, three separate encode invocations, each independently climbing into the 20-30 GB range before the kernel stepped in. Not a single runaway process — a *pattern*.
 
-### Ruling Out the Obvious
+### 8.2 Ruling Out the Obvious
 
 My first hypothesis was a retry loop: something crashing and immediately relaunching, compounding memory across restarts. `crontab -l` showed nothing relevant, and `journalctl -k` showed no repeat kills after 11:00:04 — the storm was a one-time event, three legitimate parallel batch jobs colliding with an already memory-constrained box, not an automation bug. Ruled out quickly; the real question was why a *single* `EncodePNG.encode()` invocation needs 20-30 GB in the first place.
 
-### Reading the Code First
+### 8.3 Reading the Code First
 
 `encode_png.py`'s `process_global_tiles` — the fallback path used for most variables — already does the textbook-correct thing:
 
@@ -173,7 +173,7 @@ One tile's data in, encoded, deleted, garbage-collected, next tile. `TileProcess
 
 Whatever was wrong, it wasn't a missing `del`.
 
-### Measuring, Not Guessing: the `ru_maxrss` Trap
+### 8.4 Measuring, Not Guessing: the `ru_maxrss` Trap
 
 My first instinct was to instrument a loop with `resource.getrusage(resource.RUSAGE_SELF).ru_maxrss` before and after each tile fetch. The numbers looked wrong — deltas often read `0.0` right after a `gc.collect()` that should have freed real memory. `ru_maxrss` is a **high-water mark**, not current usage — it never decreases for the life of the process. Measuring "did this `del` actually free memory" with a value that structurally can't go down was measuring nothing.
 
@@ -187,7 +187,7 @@ def rss_mb():
                 return int(line.split()[1]) / 1024
 ```
 
-### Isolating the Real Store
+### 8.5 Isolating the Real Store
 
 The fallback data source for most variables is a zarr store, written incrementally per timestep by an internal client's `LocalClient.create()` / `.append(append_dim="time")`. On a real cycle:
 
@@ -201,7 +201,7 @@ fully materialized:   2.68 GB
 
 Each chunk covers roughly a *quarter of the global latitude range and half the global longitude range* — hugely coarser than the 256×256-pixel tiles `process_global_tiles` actually queries. Every tile touches at least one full chunk per timestep per variable, so each `get_data_with_latlons()` call necessarily reads more than the tile needs. That's read amplification, and it's real — but amplification alone doesn't explain unbounded growth across many *small*, individually-freed reads. Something downstream of "freed" wasn't behaving like freed.
 
-### Reproducing the Growth
+### 8.6 Reproducing the Growth
 
 I wrote a minimal loop matching `_get_tile_data`'s exact call pattern — primary fetch (`method='nearest'`), extend/fallback fetch (`method='linear'`), force materialization the way the real extraction step does, then `del` + `gc.collect()`, exactly like the production code:
 
@@ -226,7 +226,7 @@ tile 19 (x=4,y=3): RSS = 451.7 MB
 
 124.6 MB baseline to 451.7 MB after 20 tiles on a *5×5 region* — not the whole world, not all variables, just one region's primary + extend fetch. `del` and `gc.collect()` ran every single iteration and did essentially nothing to stop the climb.
 
-### Ruling Out a Leak
+### 8.7 Ruling Out a Leak
 
 Before blaming the allocator, I needed to rule out something simpler: a reference held somewhere I hadn't found — an unclosed dataset, a growing cache, xarray's file-handle LRU. The test: query the *exact same tile* ten times in a row instead of ten different tiles.
 
@@ -238,7 +238,7 @@ iter 9: RSS = 223.1 MB, gc objects: 137054, file_cache: 0
 
 Flat. Object count plateaus, `xarray.backends.file_manager.FILE_CACHE` stays empty the whole time (nothing was left open across calls), RSS stabilizes within a few iterations. No leak in the classic sense — the growth in the 20-*different*-tiles test was proportional to the number of *distinct* chunks touched, and once a chunk's bytes were resident, freeing and re-fetching the same one cost nothing new. Which meant the memory those distinct-chunk reads allocated genuinely wasn't coming back, even after `del` + `gc.collect()`.
 
-### What I Didn't Fix
+### 8.8 What I Didn't Fix
 
 Two more things came up during this investigation that are real but out of scope for a memory-safety fix:
 

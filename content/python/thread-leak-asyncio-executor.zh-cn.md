@@ -11,7 +11,7 @@ type: posts
 author: Jinze Zhou
 ---
 
-## 先说结论
+## 1. 先说结论
 
 一个长时间运行的 Python 3.12 服务每个处理周期泄漏 32 个 OS 线程；这个问题修好之后，
 RSS 还在继续涨——而所有 Python 层的 profiler（`tracemalloc`、`pympler`）都报告堆很干净。
@@ -34,7 +34,7 @@ flowchart LR
     style C fill:#e1f5fe
 ```
 
-## 症状
+## 2. 症状
 
 WavePy 是一个 7×24 运行的 Python 3.12 服务，负责摄入大型外部数据集、跑一个数值模型、
 按固定周期生成地图瓦片。每 6 小时处理一个新的数据周期。
@@ -53,7 +53,7 @@ Cycle 5 (00z):  RSS ~1650 MB
 
 Python 层面的内存没有泄漏。别的东西在吃 RSS。
 
-## 从内存到线程
+## 3. 从内存到线程
 
 直接看 `/proc/PID/status`：
 
@@ -87,7 +87,7 @@ $ for t in /proc/3000119/task/*/wchan; do cat "$t"; done | sort | uniq -c | sort
 
 314 个线程在 `futex_wait_queue`——空闲在 executor 线程池中，等待工作提交。进程已经跑了 21.5 小时，这些线程没有一个被回收。
 
-## 线程时间线取证
+## 4. 线程时间线取证
 
 每个线程的启动时间记录在 `/proc/PID/task/TID/stat` 的第 22 个字段（`starttime`，单位是系统启动以来的时钟 tick）。我提取了全部 332 个线程的启动时间，换算成相对进程启动的秒数：
 
@@ -113,7 +113,7 @@ done | sort -k2 -n > /tmp/thread_timeline.txt
 
 每个批次出现的时刻恰好对应一个 pipeline handler 完成的时间——下载结束、模型启动、瓦片上传开始。每次 handler 调用创建一个完整的 32 线程池，然后再也不销毁。
 
-## 架构：三层嵌套 asyncio.run()
+## 5. 架构：三层嵌套 asyncio.run()
 
 WavePy 的事件 consumer 把异步 handler 分派到工作线程执行，嵌套关系如下：
 
@@ -150,7 +150,7 @@ flowchart LR
 
 但 332 个线程全都还在。
 
-## Reproducer 不泄漏
+## 6. Reproducer 不泄漏
 
 我写了三个 reproducer，完全复制了同样的嵌套架构：
 
@@ -179,7 +179,7 @@ await asyncio.to_thread(run_handler_sync, handler, event)
 
 是 WavePy 真实代码路径里的某些东西阻止了清理。
 
-## Fire-and-Forget 模式
+## 7. Fire-and-Forget 模式
 
 tile upload 完成 handler 的实际代码：
 
@@ -211,7 +211,7 @@ async def _process_tile_upload_request_event(event):
 
 加上每次 handler 调用都创建一个*全新的* `asyncio.run()`、带一个*全新的*默认 executor（最多 32 线程），且清理可能不完全 join 它们，泄漏在每个周期上累积。
 
-## 第三处未加限制的 asyncio.run()，藏在死代码后面
+## 8. 第三处未加限制的 asyncio.run()，藏在死代码后面
 
 `noaa.py` 的下载函数是第三处调用 `asyncio.run()` 的地方——值得检查一下它是不是也有跟
 另外两处一样的 executor 不限流问题。下载代码里有这个模式，在两个地方重复出现：
@@ -232,7 +232,7 @@ except RuntimeError:
 
 这段死代码不只是无害的杂物：它掩盖了一个事实——活着的那条分支 `asyncio.run(coro)` 在*每次*调用时都无条件执行，每次都创建一个全新的、不限流的默认 executor，跟另外两处调用点是同一个问题。
 
-## OpenBLAS 线程池
+## 9. OpenBLAS 线程池
 
 线程时间线里，启动的头几毫秒就有 25 个线程被创建——在任何 handler 运行之前。这些来自 OpenBLAS，它在 `import numpy` 时给每个 CPU 核心创建一个线程。
 
@@ -245,11 +245,11 @@ $ grep -rn 'np\.dot\|np\.matmul\|np\.linalg\|scipy\.linalg\|np\.fft' src/
 
 没有匹配。WavePy 用的是 `scipy.interpolate.griddata`（Delaunay 三角化，不走 BLAS）、`RegularGridInterpolator`（索引查找 + 线性加权，不走 BLAS）、以及逐元素的 numpy 操作（`np.where`、`np.isnan`、`np.meshgrid`）。25 个 OpenBLAS 线程在进程的整个生命周期里都没做过有用的工作。
 
-## 修复
+## 10. 修复
 
 四处改动：
 
-### 1. run_capped()：限制 Executor
+### 10.1 run_capped()：限制 Executor
 
 核心修复。一个 `asyncio.run()` 的直接替代品，预设小容量的 executor：
 
@@ -272,7 +272,7 @@ def run_capped(coro):
 
 应用于 `consumer._run_async_handler_sync`、`noaa.download_data`、`noaa.download_file` 和 `event_handlers.py` 的 bootstrap cascade。
 
-### 2. 正确等待 Fire-and-Forget 任务
+### 10.2 正确等待 Fire-and-Forget 任务
 
 ```python
 # 修复前：孤立任务，泄漏 executor 线程
@@ -297,7 +297,7 @@ return True
 
 清理操作（S3 目录修剪、finish flag 创建、本地目录删除）都很快——最多几秒。等待它们确保 `asyncio.run()` shutdown 时没有孤立任务。
 
-### 3. 限制 noaa.py 的 executor（顺带删掉挡在前面的死代码）
+### 10.3 限制 noaa.py 的 executor（顺带删掉挡在前面的死代码）
 
 把 try/except `get_event_loop` 模式替换为直接的 `run_capped()` 调用——跟修复 #1 是同一个
 修复，用在这处被死代码掩盖的调用点上：
@@ -325,7 +325,7 @@ succeeded, failed, expired = run_capped(
 )
 ```
 
-### 4. 压制 OpenBLAS 线程池
+### 10.4 压制 OpenBLAS 线程池
 
 在 `wavepy.py` 顶部、任何 import numpy 之前添加：
 
@@ -336,7 +336,7 @@ os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
 
 代码库里没有任何走 BLAS 路由的操作，所以对性能零影响，消除 24 个空闲 C 线程。
 
-## 插桩
+## 11. 插桩
 
 为验证修复，我添加了轻量级的线程监控，在 `asyncio.run()` 边界读取 `/proc/self/task`：
 
@@ -348,7 +348,7 @@ def log_thread_count(label: str, detail: str = "") -> None:
 
 在 `_run_async_handler_sync` 的 handler 入口和出口调用。
 
-## 验证
+## 12. 验证
 
 杀掉旧进程（332 线程，运行 21.5 小时），用修复后的代码重启：
 
@@ -377,13 +377,13 @@ def log_thread_count(label: str, detail: str = "") -> None:
 
 关键信号是线程数在后续周期中不再增长。每个 `nested_loop_exit` 都显示 capped executor 被正确清理——数量下降或持平，而不是每次累加 32。
 
-## 为什么 Reproducer 不泄漏
+## 13. 为什么 Reproducer 不泄漏
 
 回过头看，reproducer 里的 fire-and-forget 任务在毫秒内就完成了（简单的 `time.sleep(0.1)` 桩函数）。真实 handler 提交的是耗时几秒的 S3 操作。从 "executor 工作项被提交" 到 "shutdown_default_executor 被调用" 之间的时间窗口决定了线程是否能被 join。短命的桩函数总是在 shutdown 前完成；真实 I/O 有时来不及。
 
 `run_capped()` 方案绕过了根因——即使有些线程逃过 shutdown，每个 handler 也只有 4 个线程。而正确等待清理任务则消除了 fire-and-forget 的时序问题。
 
-## 线程开销
+## 14. 线程开销
 
 修复后的稳态线程分布：
 
@@ -402,7 +402,7 @@ def log_thread_count(label: str, detail: str = "") -> None:
 
 还是比理想值高。255 个空闲池线程包括主循环未限制的 32 线程 executor 以及库的线程池（httpx、boto3）。限制主循环 executor 是下一步要做的事。
 
-## 第二部分：线程修好了，RSS 还在涨
+## 15. 第二部分：线程修好了，RSS 还在涨
 
 线程泄漏修复后，我设了一个后台监控脚本，每 5 分钟采样 `/proc/self/task`（线程数）和 `VmRSS`，然后让进程跑过两个连续的数据周期（00z 和 06z）。线程数两个周期都稳定在 304。RSS 没有：
 
@@ -424,7 +424,7 @@ def log_thread_count(label: str, detail: str = "") -> None:
 
 两个周期之间的 2 小时空闲期（监控日志第 2–21 行）提供了重要信息：RSS 整整 2 小时都是 766 MB。如果是 Python 对象泄漏——字典增长、xarray 数据集未释放——空闲期 RSS 也会漂移。实际上没有。200 MB 出现在模型运行期间，并且在 Python 释放了该周期所有关联对象后继续驻留。
 
-## /proc/smaps：内存到底在哪
+## 16. /proc/smaps：内存到底在哪
 
 `/proc/PID/smaps` 提供进程中每个内存映射的详细统计——虚拟大小、RSS、shared/private 分布。过滤匿名 `rw-p` 区域（读写、私有、无文件后备），可以把 935 MB RSS 的实际分布分类出来：
 
@@ -453,17 +453,17 @@ Python 堆（通过 `brk()` 增长的 `[heap]` 区域）只有 68 MB，匿名 RS
 
 补充一下 CPython 的内存架构：CPython 有自己的小对象分配器（`pymalloc`），管理 ≤512 字节的分配，使用 256 KB 的内存池。这些池本身是通过 glibc 的 `malloc` 分配的。更大的对象直接走 glibc。无论哪条路径，glibc 都是最底层，它的 arena 行为决定了 OS 看到的 RSS。
 
-## glibc Arena：看不见的内存池
+## 17. glibc Arena：看不见的内存池
 
 Python 堆和实际 RSS 之间 867 MB 的差距来自 glibc malloc 在多线程程序中的内存管理方式。
 
-### 单锁问题
+### 17.1 单锁问题
 
 早期的 `malloc` 实现只有一个全局堆、一把全局互斥锁。任何线程调 `malloc` 或 `free` 都得先抢这把锁。304 个线程的程序里，这就是一个串行化瓶颈——即使线程在完全不相干的内存区域分配，也要排队等同一把锁。
 
 glibc 的 ptmalloc2（大多数 Linux 系统使用的分配器）用 *arena* 解决了这个问题：多个独立的堆，每个有自己的互斥锁。
 
-### Arena 内部结构
+### 17.2 Arena 内部结构
 
 ```mermaid
 flowchart TD
@@ -508,7 +508,7 @@ flowchart TD
 - **空闲链表（bins）** — 调用 `free(ptr)` 时，chunk 被放入按大小分类的 bin（≤160 字节走 fastbin，还有 smallbin、largebin、unsorted bin）。这些 chunk *可以被复用*，但**内存页依然计入 RSS**
 - **Top Chunk** — 堆的边界。`malloc_trim()` 只能从 top chunk 往下收缩还给 OS；只要堆顶有一个活着的小分配，下面所有已释放的内存都被钉住
 
-### 线程到 Arena 的映射
+### 17.3 线程到 Arena 的映射
 
 线程第一次调用 `malloc` 时：
 1. glibc 尝试找一个互斥锁未被持有的 arena
@@ -517,7 +517,7 @@ flowchart TD
 
 这意味着：**线程创建驱动 arena 创建**。短命的线程（比如 `ThreadPoolExecutor` shutdown 后销毁的那些）会永久性地创建 arena，而 arena 比线程活得久。
 
-### 为什么 free() 不还内存
+### 17.4 为什么 free() 不还内存
 
 Python 调用 `free()`（比如 numpy 数组引用计数归零时），glibc 把 chunk 放到 arena 的空闲链表上。虚拟页面保持映射、RSS 保持提交。内存回到 OS 只有三种途径：
 
@@ -525,7 +525,7 @@ Python 调用 `free()`（比如 numpy 数组引用计数归零时），glibc 把
 2. **`mmap`/`munmap` 阈值** — 超过 128 KB 的分配绕过 arena，直接独立 `mmap`，`free` 时 `munmap` 还给 OS。这就是模型运行峰值 1675 MB 能降到 966 MB 的原因——大的 numpy 数组走的是 `mmap` 路径。但上千个小分配（Python 对象、dict 条目、字符串缓冲区）走的是 arena，释放后仍然驻留在空闲链表中
 3. **Arena 销毁** — glibc 里永远不会发生。arena 一旦创建，活到进程退出
 
-### 数据
+### 17.5 数据
 
 默认最大 arena 数是 `8 × cpu_count`。在我这台 28 核的机器上：**224 个 arena**。
 
@@ -539,7 +539,7 @@ Arena 对齐区域: 164 个, RSS = 548 MB
 
 164 个活跃 arena，107 个各自驻留超过 1 MB。最大的一个单独占了 52 MB。
 
-## 为什么这么多 Arena？
+## 18. 为什么这么多 Arena？
 
 每次调用 `run_capped()` 都创建一个新的 `ThreadPoolExecutor(max_workers=4)`，最多启动 4 个新线程。这些线程调用 `malloc` 时，glibc 给每个分配一个 arena——通常是新建的，因为 224 个名额还有大把空间。executor 关闭、线程销毁后，arena 还在。它的空闲链表里持有模型运行期间分配的内存页（numpy 数组、xarray 数据集、GRIB 缓冲区），Python 已经 `free` 了，但 glibc 没有 `munmap` 还给 OS。
 
@@ -563,9 +563,9 @@ flowchart TD
     style I fill:#fce4ec
 ```
 
-## 修复：两行代码
+## 19. 修复：两行代码
 
-### 1. 限制 Arena 数量
+### 19.1 限制 Arena 数量
 
 ```python
 # wavepy.py — 任何 import 之前
@@ -578,7 +578,7 @@ os.environ.setdefault('MALLOC_ARENA_MAX', '4')
 
 4 个 arena 下，新线程复用已有的 arena，而不是创建新的。arena 里释放的内存会被下一个分配到同一 arena 的线程复用。
 
-### 2. 每批事件后 Trim
+### 19.2 每批事件后 Trim
 
 即使限制了 arena 数量，释放的内存也只是回到 arena 的空闲链表，没有还给 OS。`malloc_trim(0)` 遍历所有 arena，把堆顶的空闲块通过 `munmap` 归还：
 
@@ -611,13 +611,13 @@ if tasks:
 
 只在有事件处理时执行——空闲 poll 跳过。
 
-## 为什么不能只用 malloc_trim 不设 MALLOC_ARENA_MAX？
+## 20. 为什么不能只用 malloc_trim 不设 MALLOC_ARENA_MAX？
 
 `malloc_trim` 只能释放每个 arena *堆顶*的空闲块。如果堆顶有一个小分配钉在那里，它下面的所有空闲内存都无法释放——即使全部都 free 了。164 个 arena 里总有几个碰到"堆顶被钉住"的情况。
 
 `MALLOC_ARENA_MAX=4` 减少需要管理的 arena 数量、集中分配，使 `malloc_trim` 的效果大幅提高。两者互补。
 
-## 完整内存图景
+## 21. 完整内存图景
 
 ```text
 层级           内容                        RSS 影响      修复
@@ -634,7 +634,7 @@ AWS CRT       14 个事件循环线程           ~8 MB         预期内，不�
 
 Python 堆——`tracemalloc` 和 `pympler` 能观测到的部分——自始至终只有 68 MB。glibc arena 中的 548 MB 和其他匿名映射中的 319 MB 都在 Python 内存分析工具能观察到的层级之下。诊断这个问题需要直接读 `/proc/smaps`。
 
-## 第三部分：os.environ 来得太晚
+## 22. 第三部分：os.environ 来得太晚
 
 部署所有修复并重启进程后，我监控了一个完整的 pipeline 周期。`malloc_trim` 在工作——单次释放最多 339 MB：
 
@@ -661,7 +661,7 @@ $ cat /proc/13983/environ | tr '\0' '\n' | grep MALLOC_ARENA_MAX
 
 598 个匿名映射——比上一轮的 164 个还多。`MALLOC_ARENA_MAX=4` 从未生效。
 
-### glibc 只读一次环境变量
+### 22.1 glibc 只读一次环境变量
 
 ```mermaid
 sequenceDiagram
@@ -683,7 +683,7 @@ sequenceDiagram
 
 `OPENBLAS_NUM_THREADS` 之所以能通过同样的 `os.environ.setdefault()` 调用生效，是因为 OpenBLAS 惰性读取线程数——在第一次 BLAS 调用时才读。`setdefault` 在任何 numpy import 之前执行，所以 OpenBLAS 看得到。两个库，同一个 Python API 调用，不同的初始化时机——一个有效，一个无效。
 
-### 在进程启动之前设置环境变量
+### 22.2 在进程启动之前设置环境变量
 
 变量必须在二进制文件启动之前就存在于进程环境中。我把它移到了 `pyproject.toml` 的 pixi task 定义里：
 
@@ -696,7 +696,7 @@ Pixi 在启动 Python 解释器之前注入这些环境变量。glibc 在初始�
 
 其他进程管理器同理——systemd、Docker、supervisord。环境变量必须设在进程级别，不能在应用内部设。
 
-### 实际结果
+### 22.3 实际结果
 
 用修正后的环境重启：
 
@@ -731,7 +731,7 @@ Cycle 3 后    532 MB    +18
 
 每周期增长从 +200 MB（无上界）降到了 +5–18 MB（收敛中）。初始的 +125 MB 是一次性开销——4 个 arena 填满各自的工作集。此后释放的内存在 arena 内部被复用，不再溢出到新的 arena。
 
-## 收获
+## 23. 收获
 
 - **嵌套的 `asyncio.run()` 就是嵌套的 executor 工厂。** 每个 `asyncio.run()` 会在第一次
   有代码调用 `asyncio.to_thread()` 或 `run_in_executor(None, ...)` 时惰性创建自己的默认

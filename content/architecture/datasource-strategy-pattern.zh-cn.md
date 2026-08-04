@@ -21,9 +21,9 @@ type: posts
 author: Jinze Zhou
 ---
 
-## 这其实是个通用问题
+## 1. 这其实是个通用问题
 
-抛开瓦片和预报数据的具体场景，这个问题本身是通用的：M 个消费方调用点需要 N
+这个问题的骨架是通用的：M 个消费方调用点需要 N
 种数据类型，而每种数据类型都可能由不止一个互相独立的上游源产出，且每个源的事件/负载
 结构都不一样。如果不做抽象，最直接的修复方式是在每个调用点加一个 fallback
 分支——暴露面是 **M × N × 源的数量**，而且每个分支还得知道该信哪个源、怎么处理部分失败。
@@ -44,7 +44,7 @@ flowchart LR
 adapter——从不触碰任何消费方。不管"源"是支付 webhook、多家鉴权 provider，还是消息
 队列，这个骨架都成立——包括下面这个具体案例：一个 Postgres outbox 和一个 S3 manifest 流。
 
-## 一个具体案例
+## 2. 一个具体案例
 
 这是这套骨架的一个具体实例：一个我维护的 Next.js 应用，渲染地理空间瓦片和时间序列
 预报数据。这个应用从两个完全独立的数据源摄入瓦片图片、GeoJSON 聚类文件和预报用的
@@ -59,7 +59,7 @@ parquet 文件：
 
 这两个数据源同时存在是历史演进的结果。PG outbox 是最早的实时通知机制；S3 manifest 是后来加入的，作为一种更健壮、最终一致、且不依赖长连接数据库的替代方案。
 
-## 问题
+## 3. 问题
 
 开始规划 manifest 集成时，最直接的做法是在每个 API 路由里写 try/catch 兜底：
 
@@ -83,7 +83,7 @@ API 路由必须知道该查哪一个。如果以后再加第三个源，就得�
 
 第三个问题出在下载逻辑本身。`downloadTilesFromEvent()` 和 `downloadFromManifestEntry()` 各自把自己源特有的类型拆解开，最后都调用同样的 `downloadTilesToStableDir()` + `createVariableSymlink()`。两条并行的代码路径做着完全相同的事，只是输入形状不一样。
 
-## 设计原则
+## 4. 设计原则
 
 动手写代码之前，我先定下几条规则。这几条都不是瓦片或预报特有的——只要一个系统里
 存在不止一个上游能产出同一个逻辑实体，这几条都成立：
@@ -96,7 +96,7 @@ API 路由必须知道该查哪一个。如果以后再加第三个源，就得�
 
 **启动时只认一个源（One source at startup）。** 根据配置，只注册一个 `DataSource` 实现。不做运行时切换，不做 fallback chain。信任哪个源，由运维人员静态决定。
 
-## 架构
+## 5. 架构
 
 这套方案把四个通用角色组合成四层，每一层只负责一件事——一个 **Adapter** 边界、一个
 与源无关的 **Orchestrator**、一个共享 **Registry**、一个 **Strategy** 接口：
@@ -133,7 +133,7 @@ flowchart TB
     PDS -->|"实现 DataSource"| API
 ```
 
-### 第一层：Adapter
+### 5.1 第一层：Adapter
 
 这是 **Adapter** 边界——唯一被允许知道某个源原生结构长什么样的地方。具体到这里，
 每个 adapter 都是一个纯函数，把源特有的类型转换成共享的 `TileInstallTask`：
@@ -155,7 +155,7 @@ export function toInstallTask(event: OutboxEvent): TileInstallTask {
 
 manifest 那边的 adapter 做的是同样的转换，只是源类型换成 `ManifestEntry`。到这一步之后，管线剩下的部分完全不知道、也不关心数据是从哪儿来的。
 
-### 第二层：TileInstaller
+### 5.2 第二层：TileInstaller
 
 这是与源无关的 **Orchestrator**——只用共享类型来编排真正的工作，完全不知道这个
 任务来自哪个源。具体到这里，它接收一个 `TileInstallTask`，做四件事：
@@ -167,7 +167,7 @@ manifest 那边的 adapter 做的是同样的转换，只是源类型换成 `Man
 
 关键的设计决定是：**installer 不拥有下载逻辑本身。** 它把下载委托给已经存在的 `downloadTilesToStableDir()`。installer 只是一个协调者，负责把"下载 → 建符号链接 → 注册"这几步排好顺序，并管理符号链接的生命周期。
 
-### 第三层：DataRegistry
+### 5.3 第三层：DataRegistry
 
 这是共享的 **Registry**——所有消费方读取"当前有什么数据可用"的唯一地方，也是
 多个源报告同一个逻辑实体时冲突消解逻辑所在的地方。具体到这里，它是挂在 `globalThis`
@@ -191,7 +191,7 @@ private shouldAccept(existing: TileRecord | undefined, incoming: TileRecord): bo
 
 实际生产中我们同一时间只启用一个源。但这套优先级逻辑保证了即使两个源被误开启，系统的行为依然是正确的。
 
-### 第四层：DataSource Strategy
+### 5.4 第四层：DataSource Strategy
 
 这是 **Strategy** 接口——消费方调用穿过的那道缝，启动时决定一次，之后再也不分支。
 具体到这里，API 路由调用 `getGlobalDataSource()`，拿到的是启动时注册好的那个具体实现：
@@ -220,7 +220,7 @@ const ds = getGlobalDataSource();
 const tiles = await ds.getAllTiles();
 ```
 
-## 健康检查端点
+## 6. 健康检查端点
 
 有一个不太起眼但很重要的需求是运维可见性。`/api/health` 端点不能只显示"已加载 4 个瓦片"，还得显示每个变量具体在提供**哪一次**模型运行的数据：
 
@@ -247,7 +247,7 @@ const tiles = await ds.getAllTiles();
 
 有一个坑：在 DB 模式下，补漏用的 cron 会按 dateHour 对事件分类——最新的 dateHour 总是会从 S3 重新下载，而较旧的事件只做本地重新注册，不下载。重新注册这条路径会扫描本地稳定目录、重建符号链接，并同时更新 registry 和 PG 的向后兼容表。这样一来，重启之后所有状态都能在每个事件毫秒级的时间内恢复一致。
 
-## 符号链接的坑
+## 7. 符号链接的坑
 
 瓦片服务架构里，`rdm/` 目录下的符号链接指向 `tiles/` 下的稳定目录。多个符号链接可能指向同一个稳定目录（不同的模型运行批次可能共享同一份瓦片数据）。这就造成了一个危险的清理场景：如果对一个符号链接目录执行 `rm -rf`，操作系统会跟随链接**把真实文件删掉**，连带弄坏所有引用这份数据的其他符号链接。
 
@@ -259,7 +259,7 @@ const tiles = await ds.getAllTiles();
 
 清理函数用 `lstat()`（而不是 `stat()`）来检测符号链接、且不跟随链接，然后用 `unlink()` 只删除链接本身。
 
-## 如果重来我会怎么做
+## 8. 如果重来我会怎么做
 
 **registry 重建。** manifest 模式下有一个 `rebuildRegistryFromState()`，冷启动时从持久化的 manifest 状态里重新填充 registry。DB 模式用的是补漏 cron 的重新注册路径——它会扫描本地文件，一次性重建符号链接 + registry + PG。这个方案能用（对旧事件来说亚秒级完成），但比起复用补漏循环，一个专门的重建函数会更干净。
 
@@ -267,7 +267,7 @@ const tiles = await ds.getAllTiles();
 
 **优先级逻辑的测试覆盖。** 按源优先级去重这套逻辑经人工审查是正确的，但我没有一个同时跑两个源、校验 registry 最终状态的集成测试。生产环境里我们同一时间只开一个源，所以风险不高，但这确实是个缺口。
 
-## 结果
+## 9. 结果
 
 重构之后：
 

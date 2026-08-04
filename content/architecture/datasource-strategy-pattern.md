@@ -21,9 +21,9 @@ type: posts
 author: Jinze Zhou
 ---
 
-## The General Problem
+## 1. The General Problem
 
-Strip away the tiles and forecasts and the shape underneath is generic: M consumer call sites
+The shape of this problem is generic: M consumer call sites
 need N data types, and each data type can be produced by more than one independent upstream
 source, each with its own event or payload shape. Left to grow organically, the naive fix is a
 fallback branch at every call site — an **M × N × (source count)** surface area, where each
@@ -47,7 +47,7 @@ consumer. This shape holds regardless of whether the "sources" are payment webho
 providers, message brokers, or — the concrete case below — a Postgres outbox and an S3
 manifest feed.
 
-## A Concrete Instance
+## 2. A Concrete Instance
 
 Here's one instantiation of that shape: a Next.js application I maintain that renders
 geospatial map tiles and time-series forecast data. The app ingests tile images, GeoJSON
@@ -62,7 +62,7 @@ Both sources ultimately do the same thing: download tile PNGs from S3, create sy
 
 The two sources existed because they evolved at different times. The PG outbox was the original real-time notification mechanism. The S3 manifest was added later as a more robust, eventually-consistent alternative that doesn't depend on a persistent database connection.
 
-## The Problem
+## 3. The Problem
 
 When I started planning the manifest integration, the obvious approach was a try/catch fallback in every API route:
 
@@ -86,7 +86,7 @@ API routes had to know which one to query. If I ever added a third source, I'd b
 
 The third problem was the download logic itself. `downloadTilesFromEvent()` and `downloadFromManifestEntry()` each decomposed their source-specific types into the same `downloadTilesToStableDir()` + `createVariableSymlink()` calls. Two parallel code paths doing identical work with different input shapes.
 
-## Design Principles
+## 4. Design Principles
 
 Before writing any code, I set a few rules. None of these are specific to tiles or forecasts —
 they generalize to any system where more than one upstream can produce the same logical
@@ -100,7 +100,7 @@ entity:
 
 **One source at startup.** Based on configuration, register exactly one `DataSource` implementation. No runtime source switching, no fallback chains. The operator decides which source to trust.
 
-## The Architecture
+## 5. The Architecture
 
 The solution composes four well-known roles into four layers, each with a single
 responsibility — an **Adapter** boundary, a source-agnostic **Orchestrator**, a shared
@@ -138,7 +138,7 @@ flowchart TB
     PDS -->|"implements DataSource"| API
 ```
 
-### Layer 1: Adapters
+### 5.1 Layer 1: Adapters
 
 This is the **Adapter** boundary — the only place allowed to know a source's native shape.
 Concretely, each adapter here is a pure function that converts a source-specific type into the
@@ -161,7 +161,7 @@ export function toInstallTask(event: OutboxEvent): TileInstallTask {
 
 The manifest adapter does the same conversion from `ManifestEntry`. After this point, the rest of the pipeline doesn't know or care where the data came from.
 
-### Layer 2: TileInstaller
+### 5.2 Layer 2: TileInstaller
 
 This is the source-agnostic **Orchestrator** — it sequences the real work using only the
 shared type, with zero knowledge of which source the task came from. Concretely, it takes a
@@ -174,7 +174,7 @@ shared type, with zero knowledge of which source the task came from. Concretely,
 
 The key design decision: **the installer doesn't own the download logic.** It delegates to `downloadTilesToStableDir()`, which already existed. The installer is a coordinator that sequences the download → symlink → register steps and handles the symlink lifecycle.
 
-### Layer 3: DataRegistry
+### 5.3 Layer 3: DataRegistry
 
 This is the shared **Registry** — the one place every consumer reads "what's currently
 available," and the place that owns conflict resolution when more than one source reports the
@@ -199,7 +199,7 @@ The priority ordering is: **manifest > db-event**. The manifest represents a com
 
 In practice, we only enable one source at a time. But the priority logic means the system is correct even if both are accidentally enabled.
 
-### Layer 4: DataSource Strategy
+### 5.4 Layer 4: DataSource Strategy
 
 This is the **Strategy** interface — the seam consumers call through, decided once at startup
 and never branched on again. Concretely, API routes call `getGlobalDataSource()` and get back
@@ -229,7 +229,7 @@ const ds = getGlobalDataSource();
 const tiles = await ds.getAllTiles();
 ```
 
-## The Health Endpoint
+## 6. The Health Endpoint
 
 One subtle requirement was operational visibility. The `/api/health` endpoint needed to show not just "4 tiles loaded" but _which_ model run each variable is serving:
 
@@ -256,7 +256,7 @@ This was straightforward once the registry existed — just expose `getTileDetai
 
 One gotcha: in DB mode, the catch-up cron classifies events by dateHour — the latest dateHour always gets a fresh download from S3, while older events re-register from local files without downloading. The re-register path scans local stable directories, creates fresh symlinks, and updates both the registry and PG backward-compat tables. This keeps all state consistent after restart in milliseconds per event.
 
-## The Symlink Problem
+## 7. The Symlink Problem
 
 The tile serving architecture uses symlinks in an `rdm/` directory that point to stable directories under `tiles/`. Multiple symlinks can point to the same stable directory (different model runs might share tile data). This creates a dangerous cleanup scenario: if you `rm -rf` a symlink directory, the OS follows the link and **deletes the actual files**, breaking every other symlink that references them.
 
@@ -268,7 +268,7 @@ The safety rules ended up being important enough to document as hard constraints
 
 The cleanup function uses `lstat()` (not `stat()`) to detect symlinks without following them, then `unlink()` to remove just the link.
 
-## What I'd Do Differently
+## 8. What I'd Do Differently
 
 **The registry rebuild.** In manifest mode, there's a `rebuildRegistryFromState()` that re-populates the registry from persisted manifest state on cold start. DB mode uses the catch-up cron's re-register path — it scans local files and rebuilds symlinks + registry + PG in one pass. This works well enough (sub-second for older events), but a dedicated rebuild function would be cleaner than repurposing the catch-up loop.
 
@@ -276,7 +276,7 @@ The cleanup function uses `lstat()` (not `stat()`) to detect symlinks without fo
 
 **Testing the priority logic.** The source-priority deduplication is correct by inspection, but I don't have an integration test that runs both sources simultaneously and verifies the registry state. In production we only enable one source at a time, so this is low risk, but it's a gap.
 
-## Results
+## 9. Results
 
 After the refactoring:
 
